@@ -34,7 +34,6 @@ public class UserController {
     PasswordEncoder passwordEncoder;
     UserRepository userRepository;
     RoleRepository roleRepository;
-
     private static final String UPLOAD_DIR = "D:/spring_swp/demo/uploads/";
     private final StatusRepository statusRepository;
 
@@ -51,8 +50,15 @@ public class UserController {
 
     @GetMapping("/admin/create-account")
     public String showCreateAccount(Model model) {
+        List<Role> roles = roleRepository.findAll();
+        model.addAttribute("roles", roles);
         model.addAttribute("registerDTO", new RegisterDTO());
         return "create-account";
+    }
+
+    @PostMapping("/admin/create-account")
+    public String createAccount(RegisterDTO registerDTO, Model model, @RequestParam("avatarFile") MultipartFile avatarFile) {
+        return createUser(registerDTO, model, avatarFile, null, "create-account");
     }
 
     @GetMapping("/admin/getAllUser")
@@ -91,20 +97,17 @@ public class UserController {
             return "redirect:/user/admin/getAllUser";
         }
 
-        // Kiểm tra trùng lặp username hoặc email
         if (isUsernameOrEmailTaken(updatedUser, model, id)) {
             model.addAttribute("existingUser", existingUser);
             model.addAttribute("roles", roleRepository.findAll());
             return "update-user";
         }
 
-        // Cập nhật thông tin người dùng
         existingUser.setUsername(updatedUser.getUsername());
         existingUser.setEmail(updatedUser.getEmail());
         existingUser.setPhoneNumber(updatedUser.getPhoneNumber());
         existingUser.setDob(updatedUser.getDob());
 
-        // Cập nhật roleID
         if (updatedUser.getRole() != null && updatedUser.getRole().getRoleID() != null) {
             Role role = roleRepository.findById(updatedUser.getRole().getRoleID()).orElse(null);
             if (role != null) {
@@ -112,7 +115,6 @@ public class UserController {
             }
         }
 
-        // Cập nhật status
         if (updatedUser.getStatus() != null && updatedUser.getStatus().getStatusId() != null) {
             Status status = statusRepository.findById(updatedUser.getStatus().getStatusId()).orElse(null);
             if (status != null) {
@@ -136,6 +138,47 @@ public class UserController {
         return "redirect:/user/admin/getAllUser";
     }
 
+    @GetMapping("/admin/updatePassword/{id}")
+    public String showUpdatePasswordForm(@PathVariable("id") Long id, Model model) {
+        User existingUser = userRepository.findById(id).orElse(null);
+        if (existingUser == null) {
+            model.addAttribute("error", "User not found.");
+            return "redirect:/user/admin/getAllUser";
+        }
+        model.addAttribute("existingUser", existingUser);
+        return "update-password";
+    }
+
+    @PostMapping("/admin/updatePassword/{id}")
+    public String updatePassword(@PathVariable("id") Long id,
+                                 @RequestParam("currentPassword") String currentPassword,
+                                 @RequestParam("newPassword") String newPassword,
+                                 @RequestParam("confirmPassword") String confirmPassword,
+                                 Model model) {
+
+        User existingUser = userRepository.findById(id).orElse(null);
+        if (existingUser == null) {
+            model.addAttribute("error", "User not found.");
+            return "redirect:/user/admin/getAllUser";
+        }
+
+        if (!passwordEncoder.matches(currentPassword, existingUser.getPassword())) {
+            model.addAttribute("error", "Current password is incorrect.");
+            model.addAttribute("existingUser", existingUser);
+            return "update-password";
+        }
+
+        if (!newPassword.equals(confirmPassword)) {
+            model.addAttribute("error", "New passwords do not match.");
+            model.addAttribute("existingUser", existingUser);
+            return "update-password";
+        }
+
+        existingUser.setPassword(passwordEncoder.encode(newPassword));
+        userService.saveOrUpdate(existingUser);
+
+        return "redirect:/user/admin/getAllUser";
+    }
 
     private boolean isUsernameOrEmailTaken(User updatedUser, Model model, Long userId) {
         User userWithSameUsername = userRepository.findByUsername(updatedUser.getUsername());
@@ -152,39 +195,6 @@ public class UserController {
         return false;
     }
 
-    @PostMapping("/admin/updatePassword/{id}")
-    public String updatePassword(@PathVariable("id") Long id,
-                                 @RequestParam("currentPassword") String currentPassword,
-                                 @RequestParam("newPassword") String newPassword,
-                                 @RequestParam("confirmPassword") String confirmPassword,
-                                 @ModelAttribute User existingUser,
-                                 Model model) {
-
-        if (existingUser == null) {
-            model.addAttribute("error", "User not found.");
-            return "redirect:/user/admin/getAllUser";
-        }
-
-        if (!passwordEncoder.matches(currentPassword, existingUser.getPassword())) {
-            model.addAttribute("error", "Current password is incorrect.");
-            return "update-user";
-        }
-
-        if (!newPassword.equals(confirmPassword)) {
-            model.addAttribute("error", "New passwords do not match.");
-            return "update-user";
-        }
-        existingUser.setUserID(id);
-        existingUser.setPassword(passwordEncoder.encode(newPassword));
-        userService.saveOrUpdate(existingUser);
-        return "redirect:/user/admin/getAllUser";
-    }
-
-    @PostMapping("/admin/create-account")
-    public String createAccount(RegisterDTO registerDTO, Model model, @RequestParam("avatarFile") MultipartFile avatarFile) {
-        return createUser(registerDTO, model, avatarFile, null, "create-account");
-    }
-
     private String createUser(RegisterDTO registerDTO, Model model, MultipartFile avatarFile, Long roleId, String returnPage) {
         if (userService.existsByUsername(registerDTO.getUsername())) {
             model.addAttribute("error", "Username already exists.");
@@ -195,6 +205,7 @@ public class UserController {
             model.addAttribute("error", "Email already exists.");
             return returnPage;
         }
+
         User user = new User();
         user.setUsername(registerDTO.getUsername());
         user.setPassword(passwordEncoder.encode(registerDTO.getPassword()));
@@ -211,9 +222,10 @@ public class UserController {
             }
         }
 
-        Role role = new Role();
-        role.setRoleID(roleId != null ? roleId : role.getRoleID());
-        user.setRole(role);
+        Role role = roleRepository.findById(roleId != null ? roleId : 1L).orElse(null);
+        if (role != null) {
+            user.setRole(role);
+        }
 
         Status status = new Status();
         status.setStatusId(1L);
